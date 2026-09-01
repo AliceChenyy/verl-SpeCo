@@ -2822,6 +2822,27 @@ class SpecoVLLMColocateWorkerExtension(_VLLMWorkerExtensionBase):
         loaded_params = len(translated_weights)
         if is_eagle3:
             loaded_params = self._speco_update_draft_weights(translated_weights)
+        elif is_dspark:
+            # Qwen3DSparkForCausalLM.load_weights owns the "model." re-prefixing,
+            # the d2t remapping and the skip list for params the inference model
+            # never registers (mask_embedding, confidence_head). The inner
+            # Qwen3DSparkModel loader has none of that, so publishing a trained
+            # drafter through it raises on 'confidence_head'.
+            logger.warning(
+                "[speco draft ipc] loading %d translated weights into %s (method=%s), first 5 keys: %s",
+                len(translated_weights),
+                type(draft_model).__name__,
+                draft_method,
+                [n for n, _ in translated_weights[:5]],
+            )
+            draft_model.load_weights(iter(translated_weights))
+
+            try:
+                self._speco_rebuild_draft_metadata_buffers(draft_model)
+            except Exception as exc:
+                logger.warning(
+                    "[speco draft update] _build_fused_kv_buffers failed: %s", exc
+                )
         else:
             inner_model = getattr(draft_model, "model", None)
             if inner_model is None:
